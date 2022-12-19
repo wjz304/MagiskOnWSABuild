@@ -174,8 +174,8 @@
               "name": "--compress",
               "description": "Compress the WSA, The default format is 7z, you can use the format specified by --compress-format",
               "detailedinfo": "",
-              "required": false,
-              "default": false,
+              "required": true,
+              "default": true,
               "type": "boolean"
           },
           "--offline": {
@@ -198,7 +198,7 @@
               "name": "--skip-download-wsa",
               "description": "Skip download WSA.",
               "detailedinfo": "",
-              "required": false,
+              "required": true,
               "default": false,
               "type": "boolean"
           },
@@ -206,7 +206,7 @@
               "name": "--debug",
               "description": "Debug build mode.",
               "detailedinfo": "",
-              "required": false,
+              "required": true,
               "default": false,
               "type": "boolean"
           },
@@ -222,7 +222,7 @@
               "name": "--help",
               "description": "Show this help message and exit.",
               "detailedinfo": "",
-              "required": false,
+              "required": true,
               "default": false,
               "type": "boolean"
           }
@@ -324,11 +324,11 @@
           html += `</div></div>`;
         } else if (type == "boolean") {
           var par = "";
-          if (req) par = "required";
+          if (req) par = 'disabled="true"';
           var addpar = "";
-          if ('true' == dft) addpar = 'checked="checked"';
-          html += `<div class="form-group mt-1 mb-2 ${par}"><div class="form-group-header"><label class="color-fg-default text-mono f6" for="${name}">${name}</label></div><div class="form-group-body">`;
-          html += `<div class="form-checkbox my-0"><label class="color-fg-default text-mono f6 sm"><input type="checkbox" id="${name}" name="inputs[${name}]" value="${name}" ${addpar}/></label>`;
+          if (dft) addpar = 'checked="checked"';
+          html += `<div class="form-group mt-1 mb-2"><div class="form-group-header"><label class="color-fg-default text-mono f6" for="${name}">${name}</label></div><div class="form-group-body">`;
+          html += `<div class="form-checkbox my-0"><label class="color-fg-default text-mono f6 sm"><input type="checkbox" ${par} id="${name}" name="inputs[${name}]" value="${name}" ${addpar}/></label>`;
           html += `<a class="js-navigation-open Link--primary" title="${info}" data-pjax="#repo-content-pjax-container" data-turbo-frame="repo-content-turbo-frame" href="#">: ${desc}</a>`;
           html += `</label></div></div>`;
         } else {
