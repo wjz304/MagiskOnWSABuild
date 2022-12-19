@@ -1,0 +1,324 @@
+#
+# Copyright (C) 2022 Ing <https://github.com/wjz304>
+# 
+# This is free software, licensed under the MIT License.
+# See /LICENSE for more information.
+#
+
+
+name: Custom MagiskOnWSAL
+
+on:
+  issues:
+    types: [opened, reopened]
+  workflow_dispatch:
+    inputs:
+      body: 
+        description: 'issuss body'
+        required: true
+        default: ''
+        type: string
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@main
+
+      - name: Create Issues comment
+        if: github.event_name == 'issues'
+        id: comment
+        uses: actions-cool/issues-helper@v3
+        with:
+          actions: 'create-comment'
+          token: ${{ secrets.GITHUB_TOKEN }}
+          issue-number: ${{ github.event.issue.number }}
+          body: | 
+            分析 title 和 body 内容 ..  
+            > ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}  
+            ----
+          emoji: heart
+
+      - name: Set up Python 3
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Init Env
+        run : |
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
+          sudo timedatectl set-timezone "Asia/Shanghai"
+
+          python -m pip install --upgrade pip setuptools
+
+      - name: Get Issues Info
+        if: github.event_name == 'issues'
+        id: get-issues
+        uses: actions/github-script@v6
+        with:
+          script: |
+            // '<???>': 替换一次; '/<???>/g': 替换全局; '/<???>/gi': 替换全局并忽略大小写; 
+            // \u0008 \b Backspace
+            // \u0009 \t Tab
+            // \u000A \n 换行符
+            // \u000B \v 垂直制表符
+            // \u000C \f 换页
+            // \u000D \r 回车
+            // \u0022 \" 双引号 (")
+            // \u0027 \' 单引号 (')
+            // \u005C \\ 反斜杠 (\)
+            // \u00A0    不间断空格
+            // \u2028    行分隔符
+            // \u2029    段落分隔符
+            // \uFEFF    字节顺序标记
+
+            var fs = require('fs'); // 引入fs模块
+            var issuenumber = ${{ toJSON(github.event.issue.number) }};
+            var issueauth = ${{ toJSON(github.event.issue.user.login) }};
+            var issuetitle = ${{ toJSON(github.event.issue.title) }};
+            var issuebody = ${{ toJSON(github.event.issue.body) }};
+
+            if (issuetitle != null) {
+              issuetitle = issuetitle.replace(/\u000A|\u000D/g, "");  // 换行符,回车
+            }
+            
+            if (issuebody != null) {
+              // Backspace,Tab,垂直制表符,换页,换行符,回车,不间断空格,行分隔符,段落分隔符,字节顺序标记
+              issuebody = issuebody.replace(/\u0008|\u0009|\u000A|\u000B|\u000C|\u000D|\u00A0|\u2028|\u2029|\uFEFF/g, "");
+              
+              // 容错
+              issuebody = issuebody.replace(/—/g, "-");  // 中文横线
+            }
+            core.setOutput("issuenumber", JSON.stringify(issuenumber));
+            core.setOutput("issueauth", JSON.stringify(issueauth));
+            core.setOutput("issuetitle", JSON.stringify(issuetitle));
+            core.setOutput("issuebody", JSON.stringify(issuebody));
+
+      - name: Set Issues Info
+        if: github.event_name == 'issues' && success()
+        run: |
+          echo issuenumber: '${{ steps.get-issues.outputs.issuenumber }}'
+          echo issueauth:   '${{ steps.get-issues.outputs.issueauth }}'
+          echo issuetitle:  '${{ steps.get-issues.outputs.issuetitle }}'
+          echo issuebody:   '${{ steps.get-issues.outputs.issuebody }}'
+
+          echo "issuenumber="${{ steps.get-issues.outputs.issuenumber }}"" >> $GITHUB_ENV
+          echo "issueauth="${{ steps.get-issues.outputs.issueauth }}"" >> $GITHUB_ENV
+          echo "issuetitle="${{ steps.get-issues.outputs.issuetitle }}"" >> $GITHUB_ENV
+          echo "issuebody="${{ steps.get-issues.outputs.issuebody }}"" >> $GITHUB_ENV
+
+      - name: Get Build Info
+        shell: python
+        run: |
+          import os, re, json, shutil, string, subprocess
+
+          def set_output(name, value):
+              subprocess.call(["echo '{}={}' >> $GITHUB_ENV".format(name, value)], shell=True)
+
+          if __name__ == '__main__':
+
+              issues = 'false'
+              iscustom = 'true'
+              errinfo = ''
+              body = ''
+
+              try:
+                  body = ''
+
+                  if '${{ github.event_name }}' == 'issues':
+                      if '${{ env.issuetitle }}'.lower().startswith('custom'):
+                          issues = 'true'
+                          body = '${{ env.issuebody }}'
+                      else:
+                          iscustom = 'false'
+                  else:
+                      body = '${{ inputs.body }}'
+
+                  if len(body) == 0:
+                      iscustom = 'false'
+                      errinfo = 'body 错误, body is null'
+
+              except Exception as e:
+                  iscustom = 'false'
+                  errinfo = 'body 错误, {}.'.format(e)
+
+              set_output('issues', issues)
+              set_output('iscustom', iscustom)
+              set_output('errinfo', errinfo)
+              set_output('body', body)
+
+      - name: Echo Build Info
+        run: |
+          echo issues:            '${{ env.issues }}'
+          echo iscustom:          '${{ env.iscustom }}'
+          echo errinfo:           '${{ env.errinfo }}'
+          echo body:              '${{ env.body }}'
+
+      - name: Add Issues labels
+        if: env.issues == 'true' && env.iscustom == 'true'
+        uses: actions-cool/issues-helper@v3
+        with:
+          actions: 'add-labels'
+          token: ${{ secrets.GITHUB_TOKEN }}
+          issue-number: ${{ env.issuenumber }}
+          labels: 'custom,${{ env.platform }}'
+
+      - name: Update Comment Begin
+        if: env.issues == 'true' && env.iscustom == 'true'
+        uses: actions-cool/issues-helper@v3
+        with:
+          actions: 'update-comment'
+          token: ${{ secrets.GITHUB_TOKEN }}
+          comment-id: ${{ steps.comment.outputs.comment-id }}
+          update-mode: replace
+          body: |
+            ${{ env.issueauth }} 您好.  
+            您自定义的 MagiskOnWSA 已开始构建. 请前往下面的 URL 查看详细信息.  
+            > ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}  
+            ----
+          emoji: heart
+
+      - name: Update Comment Error
+        if: env.issues == 'true' && env.iscustom == 'false'
+        uses: actions-cool/issues-helper@v3
+        with:
+          actions: 'update-comment'
+          token: ${{ secrets.GITHUB_TOKEN }}
+          comment-id: ${{ steps.comment.outputs.comment-id }}
+          update-mode: replace
+          body: |
+            ${{ env.issueauth }} 您好.  
+            您自定义 MagiskOnWSA 所填写的信息有误, 无法触发编译, 请参考模板和错误提示对body进行修改并请重新触发编译(Close & Reopen).  
+            `Error Info:`  
+            `${{ env.errinfo }}`  
+            > ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}  
+            ----
+          emoji: confused
+
+      - name: Update Comment Invalid
+        if: env.issues == 'false'
+        uses: actions-cool/issues-helper@v3
+        with:
+          actions: 'update-comment'
+          token: ${{ secrets.GITHUB_TOKEN }}
+          comment-id: ${{ steps.comment.outputs.comment-id }}
+          update-mode: replace
+          body: |
+            ${{ env.issueauth }} 您好.  
+            根据 title 和 body 内容的分析, 该 Issue 并非定制 MagiskOnWSA. 将在管理员看到后会进行回复.  
+            > ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            ----
+          emoji: eyes
+
+      - name: Run Build
+        if: env.iscustom == 'true' && success()
+        shell: bash
+        run: |
+          sudo apt update
+          sudo apt upgrade -y
+          sudo apt install setools lzip wine patchelf e2fsprogs aria2 attr -y
+          python -m pip install requests
+
+          # 开始表演
+          echo "============================编译============================"
+
+          repo=https://github.com/LSPosed/MagiskOnWSALocal
+          branch=main
+
+          git clone -b ${branch} ${repo} MagiskOnWSA
+          cd MagiskOnWSA/scripts
+          
+          # 原函数在action下会卡死
+          Gen_Rand_Str() {
+              head -n 100 /dev/urandom | tr -dc '[:lower:]' | head -c $1
+          }
+          export -f Gen_Rand_Str
+          sed -i 's/Gen_Rand_Str()/Gen_Rand_Str_bak()/g' ./build.sh
+
+          ./build.sh ${{ env.body }}
+
+      - name: Generate release tag
+        if: env.iscustom == 'true' && success()
+        id: tag
+        run: |
+          echo "release_tag=$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_ENV
+
+          if [ ${{ env.issues }} == 'true' ]; then
+            echo "### ${{ env.issueauth }}'s MagiskOnWSA Custom" >> $GITHUB_STEP_SUMMARY
+            echo "👉 issues: [#${{ env.issuenumber }}](${{ github.event.issue.html_url }})" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "### ${{ github.triggering_actor }}'s MagiskOnWSA Custom" >> $GITHUB_STEP_SUMMARY
+            echo "👉 "platform": "${{ env.platform }}"  " >> $GITHUB_STEP_SUMMARY
+            echo "👉 "version": "${{ env.version }}"  " >> $GITHUB_STEP_SUMMARY
+            echo "👉 "ext": "${{ env.ext }}"  " >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Upload to Artifacts
+        if: env.iscustom == 'true' && success()
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ github.event.repository.name }}-Custom-${{ env.release_tag }}
+          path: |
+            MagiskOnWSA/output/*.zip
+
+      - name: Generate release tag
+        if: env.iscustom == 'false'
+        run: |
+          if [ ${{ env.issues }} == 'true' ]; then
+            echo "### ${{ env.issueauth }}'s MagiskOnWSA Custom" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "### ${{ github.triggering_actor }}'s MagiskOnWSA Custom" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "😞 😔 😟 😕 🙁 ☹️ 😣 😖 😫 😩 🥺 😢  " >> $GITHUB_STEP_SUMMARY
+          echo "您自定义 MagiskOnWSA 所填写的信息有误, 无法触发编译, 请参考模板和错误提示对body进行修改并请重新触发编译(Close & Reopen).  " >> $GITHUB_STEP_SUMMARY
+          echo "`Error Info:`  " >> $GITHUB_STEP_SUMMARY
+          echo "`${{ env.errinfo }}`  " >> $GITHUB_STEP_SUMMARY
+
+      - name: Update Comment Finish
+        if: env.issues == 'true' && env.iscustom == 'true' && success()
+        uses: actions-cool/issues-helper@v3
+        with:
+          actions: 'update-comment'
+          token: ${{ secrets.GITHUB_TOKEN }}
+          comment-id: ${{ steps.comment.outputs.comment-id }}
+          update-mode: replace
+          body: |
+            ${{ env.issueauth }} 您好.
+            您自定义的 MagiskOnWSA 已构建完成. 请前往下面的 URL 下载.  
+            > ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}  
+            ----  
+            PS:  
+            在Issues下评论 "transfer" 附件转快传 🚲->🏍. (请勿重复发, 操作时间 ≈ 成功个数 X 3分钟). 
+            在Issues下评论 "delete builds" 即可删该Issues的所有历史编译记录.
+            >  
+            ----  
+          emoji: hooray
+
+      - name: Close Issues
+        if: env.issues == 'true' && env.iscustom == 'true' && success()
+        uses: actions-cool/issues-helper@v3
+        with:
+          actions: 'close-issue'
+          token: ${{ secrets.GITHUB_TOKEN }}
+          issue-number: ${{ env.issuenumber }}
+
+      - name: Update Comment Fail
+        if: env.issues == 'true' && env.iscustom == 'true' && failure()
+        uses: actions-cool/issues-helper@v3
+        with:
+          actions: 'update-comment'
+          token: ${{ secrets.GITHUB_TOKEN }}
+          comment-id: ${{ steps.comment.outputs.comment-id }}
+          update-mode: replace
+          body: |
+            ${{ env.issueauth }} 您好.
+            您自定义的 MagiskOnWSA 构建失败. 请前往下面的 URL 查看详细信息对body进行修改并请重新触发编译(Close & Reopen).  
+            > ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}  
+            ----
+            PS:  
+            在Issues下评论 "delete builds" 即可删该Issues的所有历史编译记录.
+            >  
+            ----  
+          emoji: confused
