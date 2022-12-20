@@ -324,11 +324,14 @@
           html += `</div></div>`;
         } else if (type == "boolean") {
           var par = "";
-          if (req) par = 'disabled="true"';
           var addpar = "";
-          if (dft) addpar = 'checked="checked"';
-          html += `<div class="form-group mt-1 mb-2"><div class="form-group-header"><label class="color-fg-default text-mono f6" for="${name}">${name}</label></div><div class="form-group-body">`;
-          html += `<div class="form-checkbox my-0"><label class="color-fg-default text-mono f6 sm"><input type="checkbox" ${par} id="${name}" name="inputs[${name}]" value="${name}" ${addpar}/></label>`;
+          if (req) {
+            par += '<span class="pl-md">  (Online building, this option cannot be modified.)</span><br />';
+            addpar += ' disabled="true"';
+          }
+          if (dft) addpar += ' checked="checked"';
+          html += `<div class="form-group mt-1 mb-2"><div class="form-group-header"><label class="color-fg-default text-mono f6" for="${name}">${name}${par}</label></div><div class="form-group-body">`;
+          html += `<div class="form-checkbox my-0"><label class="color-fg-default text-mono f6 sm"><input type="checkbox" id="${name}" name="inputs[${name}]" value="${name}" ${addpar}/></label>`;
           html += `<a class="js-navigation-open Link--primary" title="${info}" data-pjax="#repo-content-pjax-container" data-turbo-frame="repo-content-turbo-frame" href="#">: ${desc}</a>`;
           html += `</label></div></div>`;
         } else {
@@ -459,7 +462,7 @@
             onclick="return createIssues()"
             autofocus=""
           >
-            创建
+          Create Issue
           </button>
         </form>
       </div>
