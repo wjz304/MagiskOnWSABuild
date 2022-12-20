@@ -261,7 +261,7 @@ jobs:
         with:
           name: ${{ github.event.repository.name }}-Custom-${{ env.release_tag }}
           path: |
-            MagiskOnWSA/output/*.zip
+            MagiskOnWSA/output/*
 
       - name: Generate release tag
         if: env.iscustom == 'false'
