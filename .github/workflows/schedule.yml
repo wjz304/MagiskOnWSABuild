@@ -1,0 +1,387 @@
+#
+# Copyright (C) 2022 Ing <https://github.com/wjz304>
+# 
+# This is free software, licensed under the MIT License.
+# See /LICENSE for more information.
+#
+
+
+# 默认情况下，使用存储库的GITHUB_TOKEN执行任务时，GITHUB_TOKEN触发的事件不会创建新的工作流运行。这可以防止意外创建递归工作流运行。
+# 可以通过个人TOKEN在工作流运行中触发工作流。
+# 1. 在 https://github.com/settings/tokens 创建 一个 token
+# 2. 在 https://github.com/${{ github.repository }}/settings/secrets/actions 加入上一步创建的 token
+
+
+
+name: Custom MagiskOnWSA(schedule)
+
+on:
+  issue_comment:
+    types: [created, edited, deleted]
+
+  schedule:
+    - cron: '0 0 * * *'
+
+  workflow_dispatch:
+
+jobs:
+#  dump:
+#    runs-on: ubuntu-latest
+#    steps:
+#      - name: Dump GitHub context
+#        id: github_context_step
+#        run: echo '${{ toJSON(github) }}'
+#      - name: Dump job context
+#        run: echo '${{ toJSON(job) }}'
+#      - name: Dump steps context
+#        run: echo '${{ toJSON(steps) }}'
+#      - name: Dump runner context
+#        run: echo '${{ toJSON(runner) }}'
+#      - name: Dump strategy context
+#        run: echo '${{ toJSON(strategy) }}'
+#      - name: Dump matrix context
+#        run: echo '${{ toJSON(matrix) }}'
+
+# https://docs.github.com/cn/actions/learn-github-actions/expressions
+
+  transfer:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'issue_comment' && contains('transfer', github.event.comment.body)
+    steps:
+      - name: Find runs comments
+        id: find-runs
+        uses: actions-cool/issues-helper@v3
+        with:
+          actions: 'find-comments'
+          token: ${{ secrets.GITHUB_TOKEN }}
+          issue-number: ${{ github.event.issue.number }}
+          comment-auth: 'github-actions[bot]'
+          body-includes: '${{ github.server_url }}/${{ github.repository }}/actions/runs'
+
+      - name: Downloads Artifacts
+        id: dl-artifacts
+        uses: actions/github-script@v6
+        with:
+          script: |
+            var fs = require('fs');
+            async function main() {
+                var runscomments = ${{ steps.find-runs.outputs.comments }};
+                console.log("runscomments: " + runscomments);
+
+                var runids = [];
+                for (i = 0; i < runscomments.length; i++) {
+                    bodylines = runscomments.at(i)["body"].split("\n")
+                    for (j = 0; j < bodylines.length; j++) {
+                        if (bodylines.at(j).indexOf("runs/") != -1) {
+                            let runid = bodylines.at(j).substring(bodylines.at(j).lastIndexOf('/') + 1).replace(/^\s+|\s+$/g, '');
+                            runids.push({"id": runscomments.at(i)["id"], "runid": runid});
+                        }
+                    }
+                }
+                console.log("runids: " + runids);
+
+                // https://docs.github.com/cn/rest/actions/workflow-runs#delete-workflow-run-logs
+                // https://github.com/octokit/plugin-rest-endpoint-methods.js/blob/master/src/generated/endpoints.ts
+
+                var downloadeds = [];
+                const [owner, repo] = process.env.GITHUB_REPOSITORY.split("/");
+                if (runids.length > 0) {
+                    for (index = 0; index < runids.length; index++) {
+                        try {
+                            if (false == downloadeds.includes(runids.at(index)["runid"])) {
+                                // 获取附件
+                                const artifacts = await github.rest.actions.listWorkflowRunArtifacts({
+                                    owner, 
+                                    repo,
+                                    run_id: runids.at(index)["runid"],
+                                    per_page: 100,
+                                });
+                                console.log("artifacts: %s", artifacts.data);
+                                if (artifacts.data.total_count > 0) {
+                                    // 下载附件 (正常只有一个)
+                                    for (const artifact of artifacts.data.artifacts) {
+                                        console.log(`artifact id ${artifact.id} of ${artifact.name}`)
+                                        const dlartifact = await github.rest.actions.downloadArtifact({
+                                            owner, 
+                                            repo,
+                                            artifact_id: artifact.id,
+                                            archive_format: 'zip',
+                                        });
+                                        console.log(`GET artifacts(${artifact.id}): ${dlartifact}`)
+                                        fs.mkdirSync(`${runids.at(index)["runid"]}`, {recursive:true}, (err)=>{ if(err){ throw err; }});
+                                        fs.writeFileSync(`${runids.at(index)["runid"]}/${artifact.name}.zip`, Buffer.from(dlartifact.data), (err)=>{ if(err){ throw err; }});
+                                    }
+                                    downloadeds.push(runids.at(index)["runid"]);
+                                }
+                            }
+                        } catch (error) {
+                            core.setFailed(error.message);
+                        }
+                    }
+                }
+                var dirs = '';
+                dirs = downloadeds.join(",");
+                core.setOutput("downloadeds", dirs);
+            }
+            main();
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Transfer Artifacts
+        run: |
+          # curl -sL https://git.io/file-transfer | sh 
+          # ./transfer trs *.zip
+
+          echo 'info<<EOF' >> $GITHUB_ENV
+          if [ -n "${{ steps.dl-artifacts.outputs.downloadeds }}" ]; then
+            dls=${{ steps.dl-artifacts.outputs.downloadeds }}
+            ids=(${dls//,/ })
+            for item in ${ids[@]}
+            do
+              files=""
+              if [ -d ${item} ]; then
+                for file in `ls ${item}`
+                do
+                  files="${files} -F filedata=@${item}/${file}"
+                done
+              fi
+              echo "### ${item}:  " >> $GITHUB_ENV
+              if [ -n "${files}" ]; then
+                url=$(curl -w '\n' -i ${files} "https://transfer.sh" | sed 's/\r//g; /^$/d')
+                echo "- ${url}  " >> $GITHUB_ENV
+              else
+                echo "- delete  " >> $GITHUB_ENV
+              fi
+            done
+          else
+            echo '未找到编译成功的附件, 如果编译失败或者已删除(delete builds)请重新编译后再执行本操作.  ' >> $GITHUB_ENV
+          fi
+          echo 'EOF' >> $GITHUB_ENV
+    
+      - name: Create Issues Comment
+        uses: actions-cool/issues-helper@v3
+        with:
+          actions: 'create-comment'
+          token: ${{ secrets.GITHUB_TOKEN }}
+          issue-number: ${{ github.event.issue.number }}
+          body: '${{ env.info }}'
+          emoji: rocket
+
+
+  delete_builds:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'issue_comment' && contains('delete builds', github.event.comment.body)
+    steps:
+
+      - name: Find bots comments
+        id: find-bots
+        uses: actions-cool/issues-helper@v3
+        with:
+          actions: 'find-comments'
+          token: ${{ secrets.GITHUB_TOKEN }}
+          issue-number: ${{ github.event.issue.number }}
+          comment-auth: 'github-actions[bot]'
+
+      - name: Find runs comments
+        id: find-runs
+        uses: actions-cool/issues-helper@v3
+        with:
+          actions: 'find-comments'
+          token: ${{ secrets.GITHUB_TOKEN }}
+          issue-number: ${{ github.event.issue.number }}
+          comment-auth: 'github-actions[bot]'
+          body-includes: '${{ github.server_url }}/${{ github.repository }}/actions/runs'
+
+      - name: Delete build Data
+        id: delete-build
+        uses: actions/github-script@v6
+        with:
+          script: |
+            async function main() {
+
+                var botscomments = ${{ steps.find-bots.outputs.comments }};
+                console.log("botscomments: " + botscomments);
+
+                var runscomments = ${{ steps.find-runs.outputs.comments }};
+                console.log("runscomments: " + runscomments);
+                
+                var botids = [];
+                for (i = 0; i < botscomments.length; i++) {
+                    botids.push(botscomments.at(i)["id"]);
+                }
+                console.log("botids: " + botids);
+
+                var runids = [];
+                for (i = 0; i < runscomments.length; i++) {
+                    bodylines = runscomments.at(i)["body"].split("\n")
+                    for (j = 0; j < bodylines.length; j++) {
+                        if (bodylines.at(j).indexOf("runs/") != -1) {
+                            let runid = bodylines.at(j).substring(bodylines.at(j).lastIndexOf('/') + 1).replace(/^\s+|\s+$/g, '');
+                            runids.push({"id": runscomments.at(i)["id"], "runid": runid});
+                        }
+                    }
+                }
+                console.log("runids: " + runids);
+
+                // https://docs.github.com/cn/rest/actions/workflow-runs#delete-workflow-run-logs
+                // https://github.com/octokit/plugin-rest-endpoint-methods.js/blob/master/src/generated/endpoints.ts
+
+                const [owner, repo] = process.env.GITHUB_REPOSITORY.split("/");
+                if (runids.length > 0) {
+                    var deleted = [];
+                    for (index = 0; index < runids.length; index++) {
+                        try {
+                            if (false == deleted.includes(runids.at(index)["runid"])) {
+                                // 删除日志
+                                const dellogs = await github.rest.actions.deleteWorkflowRunLogs({
+                                    owner, 
+                                    repo,
+                                    run_id: runids.at(index)["runid"],
+                                });
+                                console.log("DELETE logs: %s", dellogs);
+
+                                // 获取附件
+                                const artifacts = await github.rest.actions.listWorkflowRunArtifacts({
+                                    owner, 
+                                    repo,
+                                    run_id: runids.at(index)["runid"],
+                                    per_page: 100,
+                                });
+                                console.log("artifacts: %s", artifacts.data);
+                            
+                                // 删除附件
+                                for (const artifact of artifacts.data.artifacts) {
+                                    console.log(`artifact id ${artifact.id} of ${artifact.name}`)
+                                    const delartifacts = await github.rest.actions.deleteArtifact({
+                                        owner, 
+                                        repo,
+                                        artifact_id: artifact.id,
+                                    });
+                                    console.log(`DELETE artifacts(${artifact.id}): ${delartifacts}`)
+                                }
+                                deleted.push(runids.at(index)["runid"]);
+                            }
+                        } catch (error) {
+                            core.setFailed(error.message);
+                        }
+                    }
+                }
+
+                if (botids.length > 0) {
+                    for (index = 0; index < botids.length; index++) {
+                        try {
+                            // 更新评论
+                            const retcomments = await github.rest.issues.updateComment({
+                                owner, 
+                                repo,
+                                comment_id: botids.at(index),
+                                body: '`delete`'
+                            })
+                            console.log("PATCH emoji: %s", retcomments);
+                        } catch (error) {
+                            core.setFailed(error.message);
+                        }
+                    }
+                }
+            }
+            main();
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+
+  set_schedule:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'issue_comment' && contains(fromJson('["add schedule", "del schedule"]'), github.event.comment.body)
+    steps:
+      - name: Checkout
+        uses: actions/checkout@main
+
+      - name: Check Labels
+        id: check-comments
+        uses: actions/github-script@v6
+        with:
+          script: |
+            var labels = [];
+            var issuelabels = ${{ toJSON(github.event.issue.labels) }};
+            console.log("issuelabels: " + issuelabels);
+            for (i in issuelabels) {
+                labels.push(issuelabels[i]["name"]);
+            }
+            console.log("labels: " + labels);
+
+            var isSchedule = "false";
+            if (${{ toJSON(github.event.comment.body) }}.toLowerCase() == "add schedule") {
+                isSchedule = "true";
+            }
+            console.log("isSchedule: " + isSchedule);
+
+            if (isSchedule == "true") {
+                labels.push("schedule");
+            } else {
+                var index = labels.indexOf("schedule");
+                if (index > -1) labels.splice(index, 1);
+            }
+
+            core.setOutput("isSchedule", isSchedule);
+            core.setOutput("labels", labels.join(","));
+
+      - name: Set labels
+        uses: actions-cool/issues-helper@v3
+        with:
+          actions: 'set-labels'
+          token: ${{ secrets.GITHUB_TOKEN }}
+          issue-number: ${{ github.event.issue.number }}
+          labels: ${{ steps.check-comments.outputs.labels }}
+
+
+  checklabels:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@main
+
+      - name: Find schedule issues
+        id: find-issues
+        uses: actions-cool/issues-helper@v3
+        with:
+          actions: 'find-issues'
+          token: ${{ secrets.GITHUB_TOKEN }}
+          issue-state: 'all'
+          #title-includes: 'custom'
+          labels: 'schedule'
+
+      - name: Get Issues Info
+        id: get-issues
+        uses: actions/github-script@v6
+        with:
+          script: |
+            var issues = ${{ toJSON(steps.find-issues.outputs.issues) }};
+            // Backspace,Tab,换行符,垂直制表符,换页,回车,不间断空格,行分隔符,段落分隔符,字节顺序标记
+            issues = issues.replace(/\u0008|\u0009|\u000A|\u000B|\u000C|\u000D|\u00A0|\u2028|\u2029|\uFEFF/g, "");
+            core.setOutput("issues", JSON.stringify(issues));
+
+      - name: Reopen Issues
+        shell: python
+        run: |
+          import os, json, requests
+
+          if __name__ == '__main__':
+
+              try:
+                  issues = {}
+                  issues = json.loads(${{ steps.get-issues.outputs.issues }})
+
+                  if len(issues) > 0:
+                      headers = {'Accept': 'application/vnd.github+json', 'Authorization': 'token ${{ secrets.ISSUES }}'}
+                      data = '{"state": "open"}'
+                      for item in issues:
+                          try:
+                              url='https://api.github.com/repos/{}/issues/{}'.format('${{ github.repository }}', item['number'])
+                              res = requests.post(url=url, data=data, headers=headers)
+                              print(url)
+                              print(res.json())
+                          except:
+                              pass
+              except Exception as err:
+                  print(err)
