@@ -218,7 +218,7 @@ jobs:
         run: |
           sudo apt update
           sudo apt upgrade -y
-          sudo apt install setools lzip wine patchelf e2fsprogs aria2 attr -y
+          sudo apt install setools lzip wine patchelf e2fsprogs aria2 attr qemu-utils -y
           python -m pip install requests
 
           # 开始表演
