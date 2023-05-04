@@ -95,6 +95,13 @@ jobs:
             core.setOutput("issueauth", JSON.stringify(issueauth));
             core.setOutput("issuetitle", JSON.stringify(issuetitle));
             core.setOutput("issuebody", JSON.stringify(issuebody));
+                        if (issuebody != null) {
+               core.setOutput("issuebody", JSON.stringify(issuebody));
+            }
+            else {
+               core.setOutput("issuebody", "It is a fix for check null because Python cannot check null variable");
+            }
+
 
       - name: Set Issues Info
         if: github.event_name == 'issues' && success()
@@ -136,7 +143,7 @@ jobs:
                   else:
                       body = '${{ inputs.body }}'
 
-                  if len(body) == 0:
+                  if body == 'It is a fix for check null because Python cannot check null variable':
                       iscustom = 'false'
                       errinfo = 'body 错误, body is null'
 
