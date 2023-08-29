@@ -1,6 +1,10 @@
 # MagiskOnWSABuild
 MagiskOnWSA Online build
 
+# This repo is not longer maintained, please use
+https://github.com/YT-Advanced/WSA-Script
+
+
 # Note  
 This project is built through the triggering action of Issue.
 
